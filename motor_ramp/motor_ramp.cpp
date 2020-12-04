@@ -138,7 +138,7 @@ $ motor_ramp sine -a 1100 -r 0.5
 	PRINT_MODULE_USAGE_PARAM_INT('a', 0, 900, 1500, "Select minimum pwm duty cycle in usec", false);
 	PRINT_MODULE_USAGE_PARAM_INT('b', 2000, 901, 2100, "Select maximum pwm duty cycle in usec", true);
 	PRINT_MODULE_USAGE_PARAM_FLOAT('r', 1.0f, 0.0f, 65536.0f, "Select motor ramp duration in sec", true);
-
+	PRINT_MODULE_USAGE_ARG("stop", "command", false);
 	PRINT_MODULE_USAGE_PARAM_COMMENT("WARNING: motors will ramp up to full speed!");
 
 }
@@ -432,7 +432,13 @@ int motor_ramp_thread_main(int argc, char *argv[])
 	enum RampState ramp_state = RAMP_INIT;
 	float output = 0.0f;
 
-	while (!_thread_should_exit && strcmp(argv[myoptind], "stop")) {
+	while (!_thread_should_exit) {
+
+		if (!strcmp(argv[myoptind], "stop"))
+		{
+			_thread_should_exit = true;
+			output = 0.0f;
+		}
 
 		if (last_run > 0) {
 			dt = hrt_elapsed_time(&last_run) * 1e-6;
