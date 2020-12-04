@@ -70,7 +70,8 @@ enum RampState {
 enum Mode {
 	RAMP,
 	SINE,
-	SQUARE
+	SQUARE,
+	STOP
 };
 
 static bool _thread_should_exit = false;		/**< motor_ramp exit flag */
@@ -239,6 +240,9 @@ int motor_ramp_main(int argc, char *argv[])
 	} else if (!strcmp(argv[myoptind], "square")) {
 		_mode = SQUARE;
 
+	} else if (!strcmp(argv[myoptind], "stop")){
+		_mode = STOP;
+
 	} else {
 		usage("selected mode not valid");
 		error_flag = true;
@@ -364,6 +368,8 @@ int motor_ramp_thread_main(int argc, char *argv[])
 {
 	_thread_running = true;
 
+	int myoptind = 1;
+
 	unsigned long max_channels = 0;
 	static struct pwm_output_values last_spos;
 	static struct pwm_output_values last_min;
@@ -426,7 +432,7 @@ int motor_ramp_thread_main(int argc, char *argv[])
 	enum RampState ramp_state = RAMP_INIT;
 	float output = 0.0f;
 
-	while (!_thread_should_exit) {
+	while (!_thread_should_exit && strcmp(argv[myoptind], "stop")) {
 
 		if (last_run > 0) {
 			dt = hrt_elapsed_time(&last_run) * 1e-6;
@@ -460,7 +466,7 @@ int motor_ramp_thread_main(int argc, char *argv[])
 		case RAMP_RAMP: {
 				if (_mode == RAMP) {
 					output += 1000.0f * dt / (_max_pwm - _min_pwm) / _ramp_time;
-					PX4_INFO("direct: %.2f", (double)output);
+					//PX4_INFO("direct: %.2f", (double)output);
 
 				} else if (_mode == SINE) {
 					// sine outpout with period T = _ramp_time and magnitude between [0,1]
@@ -478,6 +484,10 @@ int motor_ramp_thread_main(int argc, char *argv[])
 					ramp_state = RAMP_REV;
 					PX4_INFO("%s finished, waiting", _mode_c);
 				}
+				if (!strcmp(argv[myoptind], "stop"))
+				{
+					_mode = STOP;
+				}
 
 				set_out(fd, max_channels, output);
 				break;
@@ -485,7 +495,7 @@ int motor_ramp_thread_main(int argc, char *argv[])
 		case RAMP_REV: {
 				if (_mode == RAMP) {
 					output -= 1000.0f * dt / (_max_pwm - _min_pwm) / _ramp_time;
-					PX4_INFO("direct: %.2f", (double)output);
+					//PX4_INFO("direct: %.2f", (double)output);
 
 				} else if (_mode == SINE) {
 					// sine outpout with period T = _ramp_time and magnitude between [0,1]
@@ -557,3 +567,4 @@ int motor_ramp_thread_main(int argc, char *argv[])
 
 	return 0;
 }
+
