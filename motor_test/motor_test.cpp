@@ -54,6 +54,17 @@ static void usage(const char *reason);
 static int _min_pwm = 1000;
 static int _max_pwm = 2000;
 static float _ramp_time;
+static bool _thread_should_exit = false;		/**< motor_ramp exit flag */
+static bool _thread_running = false;		/**< motor_ramp status flag */
+static int _motor_ramp_task;
+
+int motor_ramp_thread_main_test(int argc, char *argv[]);
+
+enum Mode {
+	RAMP
+};
+
+static Mode _mode;
 
 void motor_test(unsigned channel, float value, uint8_t driver_instance, int timeout_ms)
 {
@@ -107,21 +118,23 @@ int motor_test_main(int argc, char *argv[])
 {
 	int channel = -1; //default to all channels
 	unsigned long lval;
-	float value = 0.0f;
 	uint8_t driver_instance = 0;
+	_thread_should_exit = false;
+
 	int ch;
 	int timeout_ms = 0;
 
-	float dt = 0.001f; // prevent division with 0
+	//float dt = 0.001f;
+	float value = 0.0f;
 	//float timer = 0.0f;
 	//bool error_flag = false;
-	hrt_abstime last_run = 0;
-	if(last_run > 0)
-	{
-		dt = hrt_elapsed_time(&last_run) * 1e-7;
-	}
+	//hrt_abstime last_run = 0;
+	//if(last_run > 0)
+	//{
+	//	dt = hrt_elapsed_time(&last_run) * 1e-7;
+	//}
 
-	last_run = hrt_absolute_time();
+	//last_run = hrt_absolute_time();
 
 	int myoptind = 1;
 	const char *myoptarg = nullptr;
@@ -192,24 +205,7 @@ int motor_test_main(int argc, char *argv[])
 		} else if (strcmp("test", argv[myoptind]) == 0) {
 			// nothing to do
 		} else if (strcmp("ramp", argv[myoptind]) == 0){
-
-			value = 0;
-			while(value <= 1.0f)
-			{
-				value += 1000.0f * dt / (_max_pwm - _min_pwm) / _ramp_time;
-				motor_test(0, value, driver_instance, 0);
-				motor_test(1, value, driver_instance, 0);
-				motor_test(2, value, driver_instance, 0);
-				motor_test(3, value, driver_instance, 0);
-			}
-			while(value >= 0.0f)
-			{
-				value -= 1000.0f * dt / (_max_pwm - _min_pwm) / _ramp_time;
-				motor_test(0, value, driver_instance, 0);
-				motor_test(1, value, driver_instance, 0);
-				motor_test(2, value, driver_instance, 0);
-				motor_test(3, value, driver_instance, 0);
-			}
+			_mode = RAMP;
 			run_test = false;
 		}else {
 			usage(nullptr);
@@ -233,5 +229,63 @@ int motor_test_main(int argc, char *argv[])
 		}
 	}
 
+	_motor_ramp_task = px4_task_spawn_cmd("motor_ramp",
+					      SCHED_DEFAULT,
+					      SCHED_PRIORITY_DEFAULT + 40,
+					      2000,
+					      motor_ramp_thread_main_test,
+					      (argv) ? (char *const *)&argv[2] : (char *const *)nullptr);
+
+	return 0;
+}
+
+int motor_ramp_thread_main_test(int argc, char *argv[])
+{
+	_thread_running = true;
+
+	int myoptind = 1;
+	float value = 0.0f;
+	uint8_t driver_instance = 0;
+	float dt = 0.001f;
+	hrt_abstime last_run = 0;
+	if(last_run > 0)
+	{
+		dt = hrt_elapsed_time(&last_run) * 1e-7;
+	}
+
+	last_run = hrt_absolute_time();
+
+
+	while (!_thread_should_exit) {
+
+		if (!strcmp(argv[myoptind], "stop"))
+		{
+			_thread_should_exit = true;
+			value = 0.0f;
+
+		}
+		if (_mode == RAMP){
+
+			value = 0;
+			while(value <= 1.0f)
+			{
+				value += 1000.0f * dt / (_max_pwm - _min_pwm) / _ramp_time;
+				motor_test(0, value, driver_instance, 0);
+				motor_test(1, value, driver_instance, 0);
+				motor_test(2, value, driver_instance, 0);
+				motor_test(3, value, driver_instance, 0);
+			}
+			while(value >= 0.0f)
+			{
+				value -= 1000.0f * dt / (_max_pwm - _min_pwm) / _ramp_time;
+				motor_test(0, value, driver_instance, 0);
+				motor_test(1, value, driver_instance, 0);
+				motor_test(2, value, driver_instance, 0);
+				motor_test(3, value, driver_instance, 0);
+			}
+			_thread_should_exit = true;
+		}
+	}
+	_thread_running = false;
 	return 0;
 }
