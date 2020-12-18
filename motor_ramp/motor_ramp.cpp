@@ -58,6 +58,8 @@
 
 #include "systemlib/err.h"
 #include "uORB/topics/actuator_controls.h"
+#include <uORB/Publication.hpp>
+#include <uORB/topics/test_motor.h>
 
 enum RampState {
 	RAMP_INIT,
@@ -103,6 +105,8 @@ int set_min_pwm(int fd, unsigned long max_channels, int pwm_value);
 int set_out(int fd, unsigned long max_channels, float output);
 
 int prepare(int fd, unsigned long *max_channels);
+
+static void motor_test(unsigned channel, float value, uint8_t driver_instance, int timeout_ms);
 
 /**
  * Print the correct usage.
@@ -151,6 +155,28 @@ $ motor_ramp sine -a 1100 -r 0.5
  * The actual stack size should be set in the call
  * to task_create().
  */
+void motor_test(unsigned channel, float value, uint8_t driver_instance, int timeout_ms)
+{
+	test_motor_s test_motor{};
+	test_motor.timestamp = hrt_absolute_time();
+	test_motor.motor_number = channel;
+	test_motor.value = value;
+	test_motor.action = value >= 0.f ? test_motor_s::ACTION_RUN : test_motor_s::ACTION_STOP;
+	test_motor.driver_instance = driver_instance;
+	test_motor.timeout_ms = timeout_ms;
+
+	uORB::Publication<test_motor_s> test_motor_pub{ORB_ID(test_motor)};
+	test_motor_pub.publish(test_motor);
+
+	if (test_motor.action == test_motor_s::ACTION_STOP) {
+		PX4_INFO("motors stop command sent");
+
+	} else {
+		/* Adjust for 1-based motor indexing */
+		//PX4_INFO("motor %d set to %.2f", channel + 1, (double)value);
+	}
+}
+
 int motor_ramp_main(int argc, char *argv[])
 {
 	int myoptind = 1;
@@ -367,6 +393,7 @@ int prepare(int fd, unsigned long *max_channels)
 int motor_ramp_thread_main(int argc, char *argv[])
 {
 	_thread_running = true;
+	uint8_t driver_instance = 0;
 
 	int myoptind = 1;
 
@@ -422,7 +449,11 @@ int motor_ramp_thread_main(int argc, char *argv[])
 		_thread_should_exit = true;
 	}
 
-	set_out(fd, max_channels, 0.0f);
+	//set_out(fd, max_channels, 0.0f);
+	motor_test(0, 0.0f, driver_instance, 0);
+	motor_test(1, 0.0f, driver_instance, 0);
+	motor_test(2, 0.0f, driver_instance, 0);
+	motor_test(3, 0.0f, driver_instance, 0);
 
 	float dt = 0.001f; // prevent division with 0
 	float timer = 0.0f;
@@ -465,7 +496,11 @@ int motor_ramp_thread_main(int argc, char *argv[])
 					ramp_state = RAMP_RAMP;
 				}
 
-				set_out(fd, max_channels, output);
+				//set_out(fd, max_channels, output);
+				motor_test(0, output, driver_instance, 0);
+				motor_test(1, output, driver_instance, 0);
+				motor_test(2, output, driver_instance, 0);
+				motor_test(3, output, driver_instance, 0);
 				break;
 			}
 
@@ -495,7 +530,11 @@ int motor_ramp_thread_main(int argc, char *argv[])
 					_mode = STOP;
 				}
 
-				set_out(fd, max_channels, output);
+				//set_out(fd, max_channels, output);
+				motor_test(0, output, driver_instance, 0);
+				motor_test(1, output, driver_instance, 0);
+				motor_test(2, output, driver_instance, 0);
+				motor_test(3, output, driver_instance, 0);
 				break;
 			}
 		case RAMP_REV: {
@@ -519,7 +558,11 @@ int motor_ramp_thread_main(int argc, char *argv[])
 					PX4_INFO("%s finished, waiting", _mode_c);
 				}
 
-				set_out(fd, max_channels, output);
+				//set_out(fd, max_channels, output);
+				motor_test(0, output, driver_instance, 0);
+				motor_test(1, output, driver_instance, 0);
+				motor_test(2, output, driver_instance, 0);
+				motor_test(3, output, driver_instance, 0);
 				break;
 		}
 
@@ -530,7 +573,11 @@ int motor_ramp_thread_main(int argc, char *argv[])
 					break;
 				}
 
-				set_out(fd, max_channels, output);
+				//set_out(fd, max_channels, output);
+				motor_test(0, output, driver_instance, 0);
+				motor_test(1, output, driver_instance, 0);
+				motor_test(2, output, driver_instance, 0);
+				motor_test(3, output, driver_instance, 0);
 				break;
 			}
 		}
@@ -573,4 +620,3 @@ int motor_ramp_thread_main(int argc, char *argv[])
 
 	return 0;
 }
-
