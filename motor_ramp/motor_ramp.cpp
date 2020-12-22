@@ -58,8 +58,10 @@
 
 #include "systemlib/err.h"
 #include "uORB/topics/actuator_controls.h"
+#include <uORB/uORB.h>
 #include <uORB/Publication.hpp>
 #include <uORB/topics/test_motor.h>
+#include <uORB/topics/esc_status.h>
 
 enum RampState {
 	RAMP_INIT,
@@ -76,6 +78,21 @@ enum Mode {
 	STOP
 };
 
+struct MotorData_t {
+	unsigned int Version;                        // the version of the BL (0 = old)
+	unsigned int SetPoint;                       // written by attitude controller
+	unsigned int SetPointLowerBits;      // for higher Resolution of new BLs
+	float SetPoint_PX4; 			     // Values from PX4
+	unsigned int State;                          // 7 bit for I2C error counter, highest bit indicates if motor is present
+	unsigned int ReadMode;                       // select data to read
+	unsigned short RawPwmValue;							// length of PWM pulse
+	// the following bytes must be exactly in that order!
+	unsigned int Current;                        // in 0.1 A steps, read back from BL
+	unsigned int MaxPWM;                         // read back from BL is less than 255 if BL is in current limit
+	unsigned int Temperature;            // old BL-Ctrl will return a 255 here, the new version the temp. in
+	unsigned int RoundCount;
+};
+
 static bool _thread_should_exit = false;		/**< motor_ramp exit flag */
 static bool _thread_running = false;		/**< motor_ramp status flag */
 static int _motor_ramp_task;				/**< Handle of motor_ramp task / thread */
@@ -85,6 +102,7 @@ static int _max_pwm;
 static Mode _mode;
 static const char *_mode_c;
 static const char *_pwm_output_dev = "/dev/pwm_output0";
+MotorData_t Motor[4];
 
 /**
  * motor_ramp management function.
@@ -463,7 +481,55 @@ int motor_ramp_thread_main(int argc, char *argv[])
 	enum RampState ramp_state = RAMP_INIT;
 	float output = 0.0f;
 
+	int esc_sub = orb_subscribe(ORB_ID(esc_status));
+	orb_set_interval(esc_sub, 200);
+
+	struct esc_status_s esc_t;
+	memset(&esc_t, 0, sizeof(esc_t));
+	orb_advert_t esc_pub = orb_advertise(ORB_ID(esc_status), &esc_t);
+
+	px4_pollfd_struct_t fds[] = {
+		{ .fd = esc_sub,   .events = POLLIN },
+		/* there could be more file descriptors here, in the form like:
+		 * { .fd = other_sub_fd,   .events = POLLIN },
+		 */
+	};
+
+	int error_counter = 0;
+
 	while (!_thread_should_exit) {
+
+		int poll_ret = px4_poll(fds, 1, 50);
+
+		if(poll_ret == 0)
+		{
+			PX4_INFO("There was no data.");
+		}
+
+		else if (poll_ret < 0) {
+			/* this is seriously bad - should be an emergency */
+			if (error_counter < 10 || error_counter % 50 == 0) {
+				/* use a counter to prevent flooding (and slowing us down) */
+				PX4_ERR("ERROR return value from poll(): %d", poll_ret);
+			}
+
+			error_counter++;
+		}
+		else
+		{
+			if(fds[0].revents & POLLIN)
+			{
+				struct esc_report_s esc_report;
+				orb_copy(ORB_ID(esc_status), esc_sub, &esc_report);
+
+				for(int i = 0; i<4; i++)
+				{
+					esc_t.esc[i] = esc_report;
+				}
+
+				orb_publish(ORB_ID(esc_status), esc_pub, &esc_t);
+			}
+		}
 
 		if (!strcmp(argv[myoptind], "stop"))
 		{
