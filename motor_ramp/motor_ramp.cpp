@@ -481,55 +481,7 @@ int motor_ramp_thread_main(int argc, char *argv[])
 	enum RampState ramp_state = RAMP_INIT;
 	float output = 0.0f;
 
-	int esc_sub = orb_subscribe(ORB_ID(esc_status));
-	orb_set_interval(esc_sub, 200);
-
-	struct esc_status_s esc_t;
-	memset(&esc_t, 0, sizeof(esc_t));
-	orb_advert_t esc_pub = orb_advertise(ORB_ID(esc_status), &esc_t);
-
-	px4_pollfd_struct_t fds[] = {
-		{ .fd = esc_sub,   .events = POLLIN },
-		/* there could be more file descriptors here, in the form like:
-		 * { .fd = other_sub_fd,   .events = POLLIN },
-		 */
-	};
-
-	int error_counter = 0;
-
 	while (!_thread_should_exit) {
-
-		int poll_ret = px4_poll(fds, 1, 50);
-
-		if(poll_ret == 0)
-		{
-			PX4_INFO("There was no data.");
-		}
-
-		else if (poll_ret < 0) {
-			/* this is seriously bad - should be an emergency */
-			if (error_counter < 10 || error_counter % 50 == 0) {
-				/* use a counter to prevent flooding (and slowing us down) */
-				PX4_ERR("ERROR return value from poll(): %d", poll_ret);
-			}
-
-			error_counter++;
-		}
-		else
-		{
-			if(fds[0].revents & POLLIN)
-			{
-				struct esc_report_s esc_report;
-				orb_copy(ORB_ID(esc_status), esc_sub, &esc_report);
-
-				for(int i = 0; i<4; i++)
-				{
-					esc_t.esc[i] = esc_report;
-				}
-
-				orb_publish(ORB_ID(esc_status), esc_pub, &esc_t);
-			}
-		}
 
 		if (!strcmp(argv[myoptind], "stop"))
 		{
