@@ -40,11 +40,25 @@
 
 #include <drivers/drv_hrt.h>
 #include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/getopt.h>
-#include <px4_platform_common/log.h>
+#include <px4_platform_common/defines.h>
 #include <px4_platform_common/module.h>
+#include <px4_platform_common/tasks.h>
+#include <px4_platform_common/posix.h>
+#include <px4_platform_common/getopt.h>
 #include <uORB/Publication.hpp>
 #include <uORB/topics/test_motor.h>
+#include <uORB/topics/esc_status.h>
+#include <uORB/topics/actuator_controls.h>
+#include <uORB/topics/actuator_outputs.h>
+#include <uORB/topics/esc_report.h>
+#include <uORB/uORB.h>
+#include <poll.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <math.h>
 
 extern "C" __EXPORT int motor_test_main(int argc, char *argv[]);
 
@@ -54,13 +68,11 @@ static void usage(const char *reason);
 static int _min_pwm = 1000;
 static int _max_pwm = 2000;
 static float _ramp_time;
-static bool _thread_should_exit = false;		/**< motor_ramp exit flag */
+static bool _thread_should_exit = false;	/**< motor_ramp exit flag */
 static bool _thread_running = false;		/**< motor_ramp status flag */
 static int _motor_ramp_task;
-//static int _motor_stop_task;
 
 int motor_ramp_thread_main_test(int argc, char *argv[]);
-//int motor_stop_thread(int argc, char* argv[]);
 
 enum Mode {
 	RAMP_RAISE,
@@ -127,18 +139,7 @@ int motor_test_main(int argc, char *argv[])
 
 	int ch;
 	int timeout_ms = 0;
-
-	//float dt = 0.001f;
 	float value = 0.0f;
-	//float timer = 0.0f;
-	//bool error_flag = false;
-	//hrt_abstime last_run = 0;
-	//if(last_run > 0)
-	//{
-	//	dt = hrt_elapsed_time(&last_run) * 1e-7;
-	//}
-
-	//last_run = hrt_absolute_time();
 
 	int myoptind = 1;
 	const char *myoptarg = nullptr;
@@ -191,9 +192,11 @@ int motor_test_main(int argc, char *argv[])
 	if (myoptind >= 0 && myoptind < argc) {
 
 		if (strcmp("stop", argv[myoptind]) == 0) {
+			PX4_INFO("I'm on main\n\r");
 			channel = 0;
 			value = -1.f;
 			_mode = STOP;
+			run_test = false;
 
 		} else if (strcmp("iterate", argv[myoptind]) == 0) {
 			value = 0.15f;
@@ -239,14 +242,7 @@ int motor_test_main(int argc, char *argv[])
 					      SCHED_PRIORITY_DEFAULT + 40,
 					      2000,
 					      motor_ramp_thread_main_test,
-					      (argv) ? (char *const *)&argv[2] : (char *const *)nullptr);
-
-//	_motor_stop_task = px4_task_spawn_cmd("motor_stop",
-//					      SCHED_DEFAULT,
-//					      SCHED_PRIORITY_DEFAULT + 40,
-//					      2000,
-//					      motor_stop_thread,
-//					      (argv) ? (char *const *)&argv[2] : (char *const *)nullptr);
+					      (argv) ? (char *const *)&argv[1] : (char *const *)nullptr);
 
 	return 0;
 }
@@ -259,6 +255,19 @@ int motor_ramp_thread_main_test(int argc, char *argv[])
 	uint8_t driver_instance = 0;
 	float dt = 0.001f;
 	hrt_abstime last_run = 0;
+
+	int esc_report_sub = orb_subscribe(ORB_ID(esc_report));
+	int esc_sub = orb_subscribe(ORB_ID(esc_status));
+	orb_set_interval(esc_sub, 1000);
+
+	//px4_pollfd_struct_t fds_esc;
+	//fds_esc.fd = esc_report_sub;
+	//fds_esc.events = POLLIN;
+
+	struct esc_status_s esc;
+	memset(&esc, 0, sizeof(esc));
+	orb_advert_t esc_pub = orb_advertise(ORB_ID(esc_status), &esc);
+
 	if(last_run > 0)
 	{
 		dt = hrt_elapsed_time(&last_run) * 1e-7;
@@ -270,11 +279,28 @@ int motor_ramp_thread_main_test(int argc, char *argv[])
 
 	while (!_thread_should_exit) {
 
-		if(strcmp("stop", argv[1]) == 0)
+		struct esc_report_s esc_report;
+		orb_copy(ORB_ID(esc_report), esc_report_sub, &esc_report);
+		esc.counter++;
+		esc.timestamp = hrt_absolute_time();
+		esc.esc_count = 4;
+		esc.esc_connectiontype = esc_status_s::ESC_CONNECTION_TYPE_DSHOT;
+		esc.esc_armed_flags = (1 << 4) - 1;
+		esc.esc_online_flags = (1 << 4) - 1;
+		for(int i = 0; i < 4; i++)
 		{
+			esc.esc[i].esc_voltage = esc_report.esc_voltage;
+			esc.esc[i].esc_address = esc_report.esc_address;
+			esc.esc[i].esc_current = esc_report.esc_current;
+			esc.esc[i].esc_rpm     = esc_report.esc_rpm;
+			esc.esc[i].esc_temperature = esc_report.esc_temperature;
+		}
+		orb_publish(ORB_ID(esc_status), esc_pub, &esc);
+
+		if(strcmp(argv[1], "stop") == 0)
+		{
+			PX4_INFO("I'm on thread\n\r");
 			_mode = STOP;
-			_thread_should_exit = true;
-			value = -1.0f;
 		}
 
 		if (_mode == RAMP_RAISE){
@@ -298,7 +324,6 @@ int motor_ramp_thread_main_test(int argc, char *argv[])
 			_thread_should_exit = true;
 			value = -1.0f;
 		}
-
 		motor_test(0, value, driver_instance, 0);
 		motor_test(1, value, driver_instance, 0);
 		motor_test(2, value, driver_instance, 0);
@@ -308,21 +333,3 @@ int motor_ramp_thread_main_test(int argc, char *argv[])
 	return 0;
 }
 
-/*int motor_stop_thread(int argc, char* argv[])
-{
-	uint8_t driver_instance = 0;
-	_thread_running = true;
-	while(!_thread_should_exit)
-	{
-		if(_mode == STOP)
-		{
-			motor_test(0, -1, driver_instance, 0);
-			motor_test(1, -1, driver_instance, 0);
-			motor_test(2, -1, driver_instance, 0);
-			motor_test(3, -1, driver_instance, 0);
-			_thread_should_exit = true;
-		}
-	}
-	_thread_running = false;
-	return 0;
-}*/
